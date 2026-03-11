@@ -44,6 +44,11 @@
 - **方案**: 移植 chenyme 的 batch.py（run_batch + BatchTask SSE 任务管理器）
 - **修改文件**: `app/core/batch.py`（新建）
 
+### 修复: Workers 模型目录同步
+- **问题**: CI 检查 `check_model_catalog_sync.py` 失败，`grok-imagine-1.0-fast` 仅存在于 `model.py` 而不在 `models.ts`
+- **方案**: 在 `src/grok/models.ts` 中添加对应的 `grok-imagine-1.0-fast` 条目
+- **修改文件**: `src/grok/models.ts`
+
 ### B8: 配置迁移系统增强
 - **问题**: tqzhr 配置系统缺少废弃键迁移和未知键修剪
 - **方案**: 添加 _migrate_deprecated_config 和 _prune_unknown_config 函数，集成到 load/update 流程
