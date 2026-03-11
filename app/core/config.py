@@ -204,6 +204,95 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return result
 
 
+# 废弃配置映射：旧路径 -> 新路径
+_MIGRATION_MAP = {
+    "grok.temporary": "app.temporary",
+    "grok.stream": "app.stream",
+    "grok.thinking": "app.thinking",
+    "grok.dynamic_statsig": "app.dynamic_statsig",
+    "grok.filter_tags": "app.filter_tags",
+    "performance.media_max_concurrent": "performance.media_max_concurrent",
+}
+
+
+def _migrate_deprecated_config(
+    config_data: Dict[str, Any], valid_sections: set
+) -> tuple:
+    """
+    迁移废弃的配置键到新位置
+
+    Returns:
+        (迁移后的配置, 废弃的配置节集合)
+    """
+    deprecated_sections = set(config_data.keys()) - valid_sections
+    if not deprecated_sections:
+        return config_data, set()
+
+    result = {k: deepcopy(v) for k, v in config_data.items() if k in valid_sections}
+    migrated_count = 0
+
+    for old_section, old_values in config_data.items():
+        if not isinstance(old_values, dict):
+            continue
+        for old_key, old_value in old_values.items():
+            old_path = f"{old_section}.{old_key}"
+            new_paths = _MIGRATION_MAP.get(old_path)
+            if not new_paths:
+                continue
+            if isinstance(new_paths, str):
+                new_paths = [new_paths]
+            for new_path in new_paths:
+                try:
+                    new_section, new_key = new_path.split(".", 1)
+                    if new_section not in result:
+                        result[new_section] = {}
+                    if new_key not in result[new_section]:
+                        result[new_section][new_key] = old_value
+                    migrated_count += 1
+                except Exception as e:
+                    logger.warning(f"Skip config migration for {old_path}: {e}")
+
+    if migrated_count > 0:
+        logger.info(f"Migrated {migrated_count} config items from deprecated sections")
+
+    return result, deprecated_sections
+
+
+def _prune_unknown_config(
+    config_data: Dict[str, Any], defaults: Dict[str, Any]
+) -> tuple:
+    """
+    移除 defaults 中不存在的未知配置节/键
+
+    Returns:
+        (修剪后的配置, 移除的项)
+    """
+    if not isinstance(config_data, dict):
+        return {}, {"__root__": config_data}
+
+    pruned: Dict[str, Any] = {}
+    removed: Dict[str, Any] = {}
+
+    for section, value in config_data.items():
+        if section not in defaults:
+            removed[section] = value
+            continue
+
+        default_section = defaults.get(section)
+        if isinstance(default_section, dict) and isinstance(value, dict):
+            allowed_keys = set(default_section.keys())
+            kept = {k: v for k, v in value.items() if k in allowed_keys}
+            extra = {k: v for k, v in value.items() if k not in allowed_keys}
+            if extra:
+                removed[section] = extra
+            if kept:
+                pruned[section] = kept
+        else:
+            pruned[section] = value
+
+    return pruned, removed
+
+
 def _load_defaults() -> Dict[str, Any]:
     """加载默认配置文件"""
     if not DEFAULT_CONFIG_FILE.exists():
@@ -270,10 +359,21 @@ class Config:
                 except Exception as e:
                     logger.warning(f"Failed to migrate legacy config from {LEGACY_CONFIG_FILE}: {e}")
 
+            # 迁移废弃配置键
+            valid_sections = set(self._defaults.keys())
+            config_data, deprecated_sections = _migrate_deprecated_config(config_data, valid_sections)
+            if deprecated_sections:
+                logger.info(f"Cleaned deprecated config sections: {deprecated_sections}")
+
+            # 修剪未知配置项
+            config_data, removed_items = _prune_unknown_config(config_data, self._defaults)
+            if removed_items:
+                logger.info(f"Removed unknown config items: {removed_items}")
+
             merged = _deep_merge(self._defaults, config_data)
 
             # 自动回填缺失配置到存储
-            should_persist = (not from_remote) or (merged != before_legacy)
+            should_persist = (not from_remote) or (merged != before_legacy) or deprecated_sections or removed_items
             if should_persist:
                 async with storage.acquire_lock("config_save", timeout=10):
                     await storage.save_config(merged)
@@ -313,6 +413,9 @@ class Config:
             self._ensure_defaults()
             base = _deep_merge(self._defaults, self._config or {})
             merged = _deep_merge(base, new_config or {})
+            merged, removed_items = _prune_unknown_config(merged, self._defaults)
+            if removed_items:
+                logger.info(f"Removed unknown config items on update: {removed_items}")
             await storage.save_config(merged)
             self._config = merged
 

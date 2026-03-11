@@ -35,6 +35,7 @@ class ModelInfo(BaseModel):
     description: str = ""
     is_video: bool = False
     is_image: bool = False
+    is_image_edit: bool = False
 
 
 class ModelService:
@@ -139,6 +140,16 @@ class ModelService:
             display_name="Grok 4.20 Beta"
         ),
         ModelInfo(
+            model_id="grok-imagine-1.0-fast",
+            grok_model="grok-3",
+            rate_limit_model="grok-3",
+            model_mode="MODEL_MODE_FAST",
+            cost=Cost.HIGH,
+            display_name="Grok Image Fast",
+            description="Imagine waterfall image generation model for chat completions",
+            is_image=True
+        ),
+        ModelInfo(
             model_id="grok-imagine-1.0",
             grok_model="grok-3",
             rate_limit_model="grok-3",
@@ -156,7 +167,8 @@ class ModelService:
             cost=Cost.HIGH,
             display_name="Grok Image Edit",
             description="Image edit model",
-            is_image=True
+            is_image=True,
+            is_image_edit=True
         ),
         ModelInfo(
             model_id="grok-imagine-1.0-video",
