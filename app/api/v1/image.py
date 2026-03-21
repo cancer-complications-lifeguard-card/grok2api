@@ -360,6 +360,33 @@ async def _experimental_stream_generation(
     aspect_ratio: str,
     state: dict[str, Any],
 ):
+    # 优先走 app-chat REST API 流式生图
+    try:
+        service = ImagineExperimentalService()
+        response = await service.generate_app_chat(
+            token=token,
+            prompt=prompt,
+            n=n,
+            aspect_ratio=aspect_ratio,
+        )
+        processor = ImageStreamProcessor(
+            "grok-imagine-1.0",
+            token,
+            n=n,
+            response_format=response_format,
+        )
+        emitted = False
+        async for chunk in processor.process(response):
+            emitted = True
+            yield chunk
+        if emitted:
+            state["success"] = True
+            return
+        logger.warning("app-chat stream generation returned no chunks, fallback to ws")
+    except Exception as e:
+        logger.warning(f"app-chat stream generation failed, fallback to ws: {e}")
+
+    # fallback 到 ws 路径
     service = ImagineExperimentalService()
     queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
     index_map: Dict[int, int] = {}

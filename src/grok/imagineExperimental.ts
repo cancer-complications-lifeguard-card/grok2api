@@ -4,16 +4,21 @@ import type { GrokSettings } from "../settings";
 
 export const IMAGE_METHOD_LEGACY = "legacy" as const;
 export const IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL = "imagine_ws_experimental" as const;
+export const IMAGE_METHOD_APP_CHAT = "app_chat" as const;
 const IMAGE_METHOD_ALIASES: Record<string, ImageGenerationMethod> = {
   imagine_ws: IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL,
   experimental: IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL,
   new: IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL,
   new_method: IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL,
+  app_chat: IMAGE_METHOD_APP_CHAT,
+  appchat: IMAGE_METHOD_APP_CHAT,
+  rest: IMAGE_METHOD_APP_CHAT,
 };
 
 export type ImageGenerationMethod =
   | typeof IMAGE_METHOD_LEGACY
-  | typeof IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL;
+  | typeof IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL
+  | typeof IMAGE_METHOD_APP_CHAT;
 
 const IMAGINE_WS_HTTP_API = "https://grok.com/ws/imagine/listen";
 const IMAGINE_REFERER = "https://grok.com/imagine";
@@ -26,6 +31,7 @@ export function resolveImageGenerationMethod(raw: unknown): ImageGenerationMetho
     .trim()
     .toLowerCase();
   if (value === IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL) return IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL;
+  if (value === IMAGE_METHOD_APP_CHAT) return IMAGE_METHOD_APP_CHAT;
   if (IMAGE_METHOD_ALIASES[value]) return IMAGE_METHOD_ALIASES[value];
   return IMAGE_METHOD_LEGACY;
 }
@@ -128,6 +134,60 @@ function isCompleted(msg: WsJson, progress: number | null): boolean {
     .toLowerCase();
   if (status === "completed" || status === "done" || status === "success") return true;
   return progress !== null && progress >= 100;
+}
+
+function buildAppChatImageGenPayload(args: {
+  prompt: string;
+  n: number;
+  aspectRatio: string;
+}): Record<string, unknown> {
+  return {
+    temporary: true,
+    modelName: "grok-3",
+    modelMode: "MODEL_MODE_FAST",
+    message: args.prompt,
+    fileAttachments: [],
+    imageAttachments: [],
+    disableSearch: false,
+    enableImageGeneration: true,
+    returnImageBytes: false,
+    returnRawGrokInXaiRequest: false,
+    enableImageStreaming: true,
+    imageGenerationCount: Math.max(1, args.n),
+    forceConcise: false,
+    toolOverrides: { imageGen: true },
+    enableSideBySide: true,
+    sendFinalMetadata: true,
+    isReasoning: false,
+    disableTextFollowUps: false,
+    responseMetadata: {
+      modelConfigOverride: { modelMap: {} },
+      requestModelDetails: { modelId: "grok-3" },
+    },
+    disableMemory: false,
+    forceSideBySide: false,
+    isAsyncChat: false,
+  };
+}
+
+export async function generateImagineAppChat(args: {
+  prompt: string;
+  n: number;
+  cookie: string;
+  settings: GrokSettings;
+  aspectRatio?: string;
+}): Promise<Response> {
+  const payload = buildAppChatImageGenPayload({
+    prompt: args.prompt,
+    n: args.n,
+    aspectRatio: resolveAspectRatio(args.aspectRatio),
+  });
+  return sendConversationRequest({
+    payload,
+    cookie: args.cookie,
+    settings: args.settings,
+    referer: IMAGINE_REFERER,
+  });
 }
 
 function buildImagineWsPayload(prompt: string, requestId: string, aspectRatio: string): WsJson {

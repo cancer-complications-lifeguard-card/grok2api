@@ -53,3 +53,38 @@
 - **问题**: tqzhr 配置系统缺少废弃键迁移和未知键修剪
 - **方案**: 添加 _migrate_deprecated_config 和 _prune_unknown_config 函数，集成到 load/update 流程
 - **修改文件**: `app/core/config.py`
+
+## 2026-03-22 — 修复生图功能（ws_imagine → app-chat REST API 迁移）
+
+### 问题
+- Grok 官方废弃了 WebSocket 端点 `wss://grok.com/ws/imagine/listen`，生图功能迁移到 app-chat REST API
+- grok2api 生图代码仍调用废弃的 WS 端点，导致所有生图请求返回 `rate_limit_exceeded`
+
+### 方案
+- 改用 app-chat REST API + `imageGen` tool override 触发生图，保留 ws_imagine 作为 fallback
+
+### 修改文件
+1. **`app/services/grok/chat.py`**
+   - `build_payload()` 新增 `request_overrides` 参数，允许覆盖 payload 字段
+   - `GrokChatService.chat()` 新增 `request_overrides` 参数并透传
+2. **`app/services/grok/imagine_experimental.py`**
+   - 新增 `_build_app_chat_payload()` 静态方法，构造生图 request_overrides
+   - 新增 `generate_app_chat()` 异步方法，通过 app-chat REST API 触发生图
+   - 新增 `IMAGE_METHOD_APP_CHAT` 常量和别名映射
+3. **`app/services/grok/imagine_generation.py`**
+   - 新增 `call_app_chat_generation_once()` 方法（app-chat + ImageCollectProcessor）
+   - 新增 `call_ws_generation_once()` 方法（原 ws 路径，作为 fallback）
+   - 修改 `call_experimental_generation_once()` 优先走 app-chat，失败 fallback 到 ws
+4. **`app/api/v1/image.py`**
+   - 修改 `_experimental_stream_generation()` 优先走 app-chat + ImageStreamProcessor 流式生图，失败 fallback 到 ws
+
+5. **`src/grok/imagineExperimental.ts`**
+   - 新增 `IMAGE_METHOD_APP_CHAT` 常量和别名映射
+   - 新增 `buildAppChatImageGenPayload()` 函数，构造 app-chat 生图 payload
+   - 新增 `generateImagineAppChat()` 导出函数，通过 app-chat REST API 触发生图
+6. **`src/routes/openai.ts`**
+   - 导入 `generateImagineAppChat`
+   - 修改 `collectExperimentalGenerationImages()` 优先走 app-chat REST API，失败 fallback 到 ws
+
+### 撤回方式
+- `git checkout HEAD -- app/services/grok/chat.py app/services/grok/imagine_experimental.py app/services/grok/imagine_generation.py app/api/v1/image.py src/grok/imagineExperimental.ts src/routes/openai.ts`

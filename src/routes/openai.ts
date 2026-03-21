@@ -12,6 +12,7 @@ import { createOpenAiStreamFromGrokNdjson, parseOpenAiFromGrokNdjson } from "../
 import {
   IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL,
   generateImagineWs,
+  generateImagineAppChat,
   resolveAspectRatio,
   resolveImageGenerationMethod,
   sendExperimentalImageEditRequest,
@@ -628,6 +629,37 @@ async function collectExperimentalGenerationImages(args: {
   aspectRatio: string;
   concurrency: number;
 }): Promise<string[]> {
+  // 优先走 app-chat REST API
+  try {
+    const upstream = await generateImagineAppChat({
+      prompt: args.prompt,
+      n: args.n,
+      cookie: args.cookie,
+      settings: args.settings,
+      aspectRatio: args.aspectRatio,
+    });
+    if (upstream.ok) {
+      const rawUrls = await collectImageUrls(upstream);
+      if (rawUrls.length) {
+        const converted = await Promise.all(
+          dedupeImages(rawUrls).map((rawUrl) =>
+            convertRawUrlByFormat(rawUrl, args.responseFormat, {
+              baseUrl: args.baseUrl,
+              cookie: args.cookie,
+              settings: args.settings,
+            }),
+          ),
+        );
+        const result = dedupeImages(converted.filter(Boolean));
+        if (result.length) return result;
+      }
+    }
+    console.warn("app-chat image generation returned empty or failed, fallback to ws");
+  } catch (e) {
+    console.warn("app-chat image generation failed, fallback to ws:", e);
+  }
+
+  // fallback 到 ws
   const calls = Math.ceil(Math.max(1, args.n) / 4);
   const plans = Array.from({ length: calls }, (_, i) => {
     const alreadyPlanned = i * 4;

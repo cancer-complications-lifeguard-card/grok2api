@@ -26,12 +26,16 @@ from app.services.grok.chat import BROWSER, CHAT_API, ChatRequestBuilder
 
 IMAGE_METHOD_LEGACY = "legacy"
 IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL = "imagine_ws_experimental"
-IMAGE_METHODS = {IMAGE_METHOD_LEGACY, IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL}
+IMAGE_METHOD_APP_CHAT = "app_chat"
+IMAGE_METHODS = {IMAGE_METHOD_LEGACY, IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL, IMAGE_METHOD_APP_CHAT}
 IMAGE_METHOD_ALIASES = {
     "imagine_ws": IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL,
     "experimental": IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL,
     "new": IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL,
     "new_method": IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL,
+    "app_chat": IMAGE_METHOD_APP_CHAT,
+    "appchat": IMAGE_METHOD_APP_CHAT,
+    "rest": IMAGE_METHOD_APP_CHAT,
 }
 
 IMAGINE_WS_API = "wss://grok.com/ws/imagine/listen"
@@ -144,6 +148,55 @@ class ImagineExperimentalService:
         if progress is not None and progress >= 100:
             return True
         return False
+
+    @staticmethod
+    def _build_app_chat_payload(
+        prompt: str,
+        n: int = 4,
+        aspect_ratio: str = "2:3",
+        model_name: str = "grok-3",
+    ) -> Dict[str, Any]:
+        """构造通过 app-chat REST API 触发生图的 request_overrides"""
+        return {
+            "imageGenerationCount": max(1, int(n or 1)),
+            "enableImageGeneration": True,
+            "enableImageStreaming": True,
+            "returnImageBytes": False,
+            "toolOverrides": {"imageGen": True},
+            "forceConcise": False,
+            "enableSideBySide": True,
+            "isReasoning": False,
+        }
+
+    async def generate_app_chat(
+        self,
+        token: str,
+        prompt: str,
+        n: int = 2,
+        aspect_ratio: str = "2:3",
+    ):
+        """
+        通过 app-chat REST API 触发生图，返回流式响应。
+        调用方需使用 ImageCollectProcessor / ImageStreamProcessor 处理响应。
+        """
+        from app.services.grok.chat import GrokChatService
+
+        overrides = self._build_app_chat_payload(
+            prompt=prompt,
+            n=n,
+            aspect_ratio=aspect_ratio,
+        )
+        service = GrokChatService(proxy=self.proxy)
+        response = await service.chat(
+            token=token,
+            message=prompt,
+            model="grok-3",
+            mode="MODEL_MODE_FAST",
+            think=False,
+            stream=True,
+            request_overrides=overrides,
+        )
+        return response
 
     async def generate_ws(
         self,
@@ -411,6 +464,7 @@ __all__ = [
     "ImagineExperimentalService",
     "IMAGE_METHOD_LEGACY",
     "IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL",
+    "IMAGE_METHOD_APP_CHAT",
     "IMAGE_METHODS",
     "resolve_image_generation_method",
 ]

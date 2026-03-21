@@ -195,7 +195,8 @@ class ChatRequestBuilder:
         mode: str, 
         think: bool = None,
         file_attachments: List[str] = None,
-        image_attachments: List[str] = None
+        image_attachments: List[str] = None,
+        request_overrides: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
         构造请求体
@@ -207,6 +208,7 @@ class ChatRequestBuilder:
             think: 是否开启思考
             file_attachments: 文件附件 ID 列表
             image_attachments: 图片附件 URL 列表
+            request_overrides: 可选覆盖字段，用于传入 imageGenerationCount、enableNsfw、toolOverrides 等
         """
         temporary = get_config("grok.temporary", True)
         if think is None:
@@ -219,7 +221,7 @@ class ChatRequestBuilder:
         if image_attachments:
             merged_attachments.extend(image_attachments)
         
-        return {
+        payload = {
             "temporary": temporary,
             "modelName": model,
             "modelMode": mode,
@@ -255,6 +257,9 @@ class ChatRequestBuilder:
                 "viewportHeight": 1083
             }
         }
+        if request_overrides:
+            payload.update(request_overrides)
+        return payload
 
 
 # ==================== Grok 服务 ====================
@@ -274,7 +279,8 @@ class GrokChatService:
         think: bool = None,
         stream: bool = None,
         file_attachments: List[str] = None,
-        image_attachments: List[str] = None
+        image_attachments: List[str] = None,
+        request_overrides: Dict[str, Any] = None
     ):
         """
         发送聊天请求
@@ -288,6 +294,7 @@ class GrokChatService:
             stream: 是否流式
             file_attachments: 文件附件 ID 列表
             image_attachments: 图片附件 URL 列表
+            request_overrides: 可选覆盖字段，用于传入 imageGenerationCount、toolOverrides 等
         
         Raises:
             UpstreamException: 当 Grok API 返回错误且重试耗尽时
@@ -298,7 +305,8 @@ class GrokChatService:
         headers = ChatRequestBuilder.build_headers(token)
         payload = ChatRequestBuilder.build_payload(
             message, model, mode, think, 
-            file_attachments, image_attachments
+            file_attachments, image_attachments,
+            request_overrides=request_overrides
         )
         proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
         timeout = get_config("grok.timeout", TIMEOUT)

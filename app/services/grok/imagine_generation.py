@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable, List, Optional
 from app.core.exceptions import UpstreamException
 from app.core.logger import logger
 from app.services.grok.imagine_experimental import ImagineExperimentalService
+from app.services.grok.processor import ImageCollectProcessor
 
 
 def resolve_aspect_ratio(size: Optional[str]) -> str:
@@ -68,13 +69,37 @@ async def gather_limited(
     return await asyncio.gather(*[_run(factory) for factory in task_factories], return_exceptions=True)
 
 
-async def call_experimental_generation_once(
+async def call_app_chat_generation_once(
     token: str,
     prompt: str,
     response_format: str = "b64_json",
     n: int = 4,
     aspect_ratio: str = "2:3",
 ) -> List[str]:
+    """通过 app-chat REST API 触发生图，使用 ImageCollectProcessor 收集结果"""
+    service = ImagineExperimentalService()
+    response = await service.generate_app_chat(
+        token=token,
+        prompt=prompt,
+        n=n,
+        aspect_ratio=aspect_ratio,
+    )
+    processor = ImageCollectProcessor(
+        "grok-imagine-1.0",
+        token,
+        response_format=response_format,
+    )
+    return await processor.process(response)
+
+
+async def call_ws_generation_once(
+    token: str,
+    prompt: str,
+    response_format: str = "b64_json",
+    n: int = 4,
+    aspect_ratio: str = "2:3",
+) -> List[str]:
+    """通过 WebSocket 端点生图（旧路径，作为 fallback）"""
     service = ImagineExperimentalService()
     raw_urls = await service.generate_ws(
         token=token,
@@ -83,6 +108,36 @@ async def call_experimental_generation_once(
         aspect_ratio=aspect_ratio,
     )
     return await service.convert_urls(token=token, urls=raw_urls, response_format=response_format)
+
+
+async def call_experimental_generation_once(
+    token: str,
+    prompt: str,
+    response_format: str = "b64_json",
+    n: int = 4,
+    aspect_ratio: str = "2:3",
+) -> List[str]:
+    """优先走 app-chat REST API，失败后 fallback 到 ws"""
+    try:
+        images = await call_app_chat_generation_once(
+            token=token,
+            prompt=prompt,
+            response_format=response_format,
+            n=n,
+            aspect_ratio=aspect_ratio,
+        )
+        if images:
+            return images
+        logger.warning("app-chat image generation returned empty, fallback to ws")
+    except Exception as e:
+        logger.warning(f"app-chat image generation failed, fallback to ws: {e}")
+    return await call_ws_generation_once(
+        token=token,
+        prompt=prompt,
+        response_format=response_format,
+        n=n,
+        aspect_ratio=aspect_ratio,
+    )
 
 
 async def collect_experimental_generation_images(
@@ -132,6 +187,8 @@ __all__ = [
     "is_valid_image_value",
     "dedupe_images",
     "gather_limited",
+    "call_app_chat_generation_once",
+    "call_ws_generation_once",
     "call_experimental_generation_once",
     "collect_experimental_generation_images",
 ]
