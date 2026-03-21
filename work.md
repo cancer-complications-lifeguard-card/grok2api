@@ -1,5 +1,7 @@
 # Grok2API-tqzhr 功能同步记录
 
+## 2026-03-21
+
 ## 2026-03-11 — 从 grok2api-chenyme 同步新增功能
 
 ### A1: Chat 新增 reasoning_effort/temperature/top_p 参数
